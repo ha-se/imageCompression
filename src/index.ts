@@ -52,7 +52,7 @@ async function runCompressionForField(
   }
   console.log();
 
-  const records = await client.getAllRecords("order by $id asc", [
+  const records = await client.getAllRecords("", [
     "$id",
     fieldCode,
   ]);

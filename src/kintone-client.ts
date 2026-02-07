@@ -30,15 +30,13 @@ export class KintoneClient {
     return h;
   }
 
-  async getRecords(
+  private async fetchRecords(
     query: string,
-    fields: string[],
-    offset = 0,
-    limit = 500
+    fields: string[]
   ): Promise<KintoneGetRecordsResponse> {
     const params = new URLSearchParams({
       app: this.appId,
-      query: `${query} limit ${limit} offset ${offset}`,
+      query,
     });
     for (const f of fields) {
       params.append("fields[]", f);
@@ -63,14 +61,26 @@ export class KintoneClient {
     fields: string[]
   ): Promise<KintoneRecord[]> {
     const all: KintoneRecord[] = [];
-    let offset = 0;
+    let lastId = "0";
     const limit = 500;
 
+    // fieldsに$idが含まれていない場合は追加
+    const fieldsWithId = fields.includes("$id")
+      ? fields
+      : ["$id", ...fields];
+
     while (true) {
-      const res = await this.getRecords(query, fields, offset, limit);
+      // $idベースのカーソルページネーション（offset上限10,000を回避）
+      const idCondition = `$id > "${lastId}"`;
+      const fullQuery = query
+        ? `${idCondition} and (${query}) order by $id asc limit ${limit}`
+        : `${idCondition} order by $id asc limit ${limit}`;
+
+      const res = await this.fetchRecords(fullQuery, fieldsWithId);
       all.push(...res.records);
       if (res.records.length < limit) break;
-      offset += limit;
+
+      lastId = res.records[res.records.length - 1].$id.value;
     }
 
     return all;

@@ -30,7 +30,7 @@ export async function deleteOldImages(
   console.log(`対象フィールド: ${fieldCodes.join(", ")}`);
   console.log();
 
-  const query = `作成日時 < "${cutoffDate}" order by $id asc`;
+  const query = `作成日時 < "${cutoffDate}"`;
   const records = await client.getAllRecords(query, ["$id", ...fieldCodes]);
 
   console.log(`対象レコード数: ${records.length}`);
