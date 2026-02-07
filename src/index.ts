@@ -1,6 +1,8 @@
+import { ApiCounter } from "./api-counter.js";
+import { compressToBuffer, isImageFile } from "./compressor.js";
+import { deleteOldImages } from "./delete-old-images.js";
 import { KintoneClient } from "./kintone-client.js";
-import { compressToBuffer, isImageFile, toJpegName } from "./compressor.js";
-import type { Config, KintoneFileInfo, ProcessResult } from "./types.js";
+import type { Config, ProcessResult } from "./types.js";
 
 function loadConfig(): Config {
   const required = (key: string): string => {
@@ -16,6 +18,10 @@ function loadConfig(): Config {
     attachmentField: required("KINTONE_ATTACHMENT_FIELD"),
     maxFileSizeMB: Number(process.env.MAX_FILE_SIZE_MB ?? "1"),
     targetQuality: Number(process.env.TARGET_QUALITY ?? "80"),
+    retentionMonths: Number(process.env.RETENTION_MONTHS ?? "3"),
+    enableDeleteOldImages: process.env.ENABLE_DELETE_OLD_IMAGES === "true",
+    maxApiCalls: Number(process.env.MAX_API_CALLS ?? "9000"),
+    batchSize: Number(process.env.BATCH_SIZE ?? "0"),
   };
 }
 
@@ -29,9 +35,11 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function main(): Promise<void> {
-  const config = loadConfig();
-  const client = new KintoneClient(config);
+async function runCompression(
+  client: KintoneClient,
+  config: Config,
+  apiCounter: ApiCounter
+): Promise<{ hasErrors: boolean }> {
   const maxSizeBytes = config.maxFileSizeMB * 1024 * 1024;
   const fieldCode = config.attachmentField;
 
@@ -39,6 +47,9 @@ async function main(): Promise<void> {
   console.log(`対象アプリ: ${config.appId}`);
   console.log(`添付ファイルフィールド: ${fieldCode}`);
   console.log(`圧縮閾値: ${config.maxFileSizeMB}MB`);
+  if (config.batchSize > 0) {
+    console.log(`バッチサイズ: ${config.batchSize}件`);
+  }
   console.log();
 
   const records = await client.getAllRecords("order by $id asc", [
@@ -50,8 +61,25 @@ async function main(): Promise<void> {
   const results: ProcessResult[] = [];
   let totalCompressed = 0;
   let totalSaved = 0;
+  let processedCount = 0;
+  let stoppedByApiLimit = false;
 
   for (const record of records) {
+    // バッチサイズ制限チェック
+    if (config.batchSize > 0 && processedCount >= config.batchSize) {
+      console.log(`バッチサイズ上限 (${config.batchSize}件) に達しました`);
+      break;
+    }
+
+    // API上限チェック（最低3回必要: download + upload + update）
+    if (!apiCounter.hasCapacity(3)) {
+      console.log(
+        `API呼出上限に達したため圧縮処理を中断しました (${apiCounter.current}/${config.maxApiCalls})`
+      );
+      stoppedByApiLimit = true;
+      break;
+    }
+
     const recordId = record.$id.value;
     const files = KintoneClient.extractFiles(record, fieldCode);
 
@@ -105,7 +133,8 @@ async function main(): Promise<void> {
           result.files.push(compressed.result);
           recordModified = true;
           totalCompressed++;
-          totalSaved += compressed.result.originalSize - compressed.result.compressedSize;
+          totalSaved +=
+            compressed.result.originalSize - compressed.result.compressedSize;
 
           console.log(
             `    -> ${compressed.result.newName} (${formatSize(compressed.result.compressedSize)}) に圧縮完了`
@@ -134,6 +163,7 @@ async function main(): Promise<void> {
     }
 
     results.push(result);
+    processedCount++;
 
     // Rate limiting: wait between records to avoid hitting API limits
     await sleep(200);
@@ -141,10 +171,15 @@ async function main(): Promise<void> {
 
   // Summary
   console.log();
-  console.log("=== 処理結果 ===");
+  console.log("=== 圧縮結果 ===");
   console.log(`処理レコード数: ${results.length}`);
   console.log(`圧縮ファイル数: ${totalCompressed}`);
   console.log(`削減サイズ合計: ${formatSize(totalSaved)}`);
+  console.log(`API呼出数: ${apiCounter.current}`);
+
+  if (stoppedByApiLimit) {
+    console.log("※ API上限により中断 — 残りは次回実行時に処理されます");
+  }
 
   const errorCount = results.reduce((sum, r) => sum + r.errors.length, 0);
   if (errorCount > 0) {
@@ -154,10 +189,41 @@ async function main(): Promise<void> {
         console.error(`  レコード#${r.recordId}: ${e}`);
       }
     }
-    process.exit(1);
   }
 
+  return { hasErrors: errorCount > 0 };
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const apiCounter = new ApiCounter(config.maxApiCalls);
+  const client = new KintoneClient(config, apiCounter);
+  let hasErrors = false;
+
+  // Phase 1: 古い画像の削除（有効時のみ）
+  if (config.enableDeleteOldImages) {
+    const deleteResult = await deleteOldImages(client, config, apiCounter);
+    const deleteErrors = deleteResult.results.filter((r) => r.error).length;
+    if (deleteErrors > 0) hasErrors = true;
+
+    if (deleteResult.stoppedByApiLimit) {
+      console.log();
+      console.log("API上限により圧縮処理はスキップします");
+      console.log("=== 完了 ===");
+      process.exit(hasErrors ? 1 : 0);
+    }
+    console.log();
+  }
+
+  // Phase 2: 画像圧縮
+  const compressResult = await runCompression(client, config, apiCounter);
+  if (compressResult.hasErrors) hasErrors = true;
+
   console.log("=== 完了 ===");
+
+  if (hasErrors) {
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

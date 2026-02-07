@@ -1,3 +1,4 @@
+import type { ApiCounter } from "./api-counter.js";
 import type {
   Config,
   KintoneFileInfo,
@@ -10,11 +11,13 @@ export class KintoneClient {
   private baseUrl: string;
   private apiToken: string;
   private appId: string;
+  private apiCounter?: ApiCounter;
 
-  constructor(config: Config) {
+  constructor(config: Config, apiCounter?: ApiCounter) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.apiToken = config.apiToken;
     this.appId = config.appId;
+    this.apiCounter = apiCounter;
   }
 
   private headers(contentType?: string): Record<string, string> {
@@ -45,6 +48,7 @@ export class KintoneClient {
       `${this.baseUrl}/k/v1/records.json?${params.toString()}`,
       { headers: this.headers() }
     );
+    this.apiCounter?.increment();
 
     if (!res.ok) {
       const body = await res.text();
@@ -78,6 +82,7 @@ export class KintoneClient {
       `${this.baseUrl}/k/v1/file.json?${params.toString()}`,
       { headers: this.headers() }
     );
+    this.apiCounter?.increment();
 
     if (!res.ok) {
       const body = await res.text();
@@ -102,6 +107,7 @@ export class KintoneClient {
       },
       body: formData,
     });
+    this.apiCounter?.increment();
 
     if (!res.ok) {
       const body = await res.text();
@@ -131,6 +137,7 @@ export class KintoneClient {
       headers: this.headers("application/json"),
       body: JSON.stringify(body),
     });
+    this.apiCounter?.increment();
 
     if (!res.ok) {
       const text = await res.text();

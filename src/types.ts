@@ -33,6 +33,13 @@ export interface ProcessResult {
   errors: string[];
 }
 
+export interface DeleteResult {
+  recordId: string;
+  deletedFiles: string[];
+  keptFiles: string[];
+  error?: string;
+}
+
 export interface Config {
   baseUrl: string;
   apiToken: string;
@@ -40,4 +47,8 @@ export interface Config {
   attachmentField: string;
   maxFileSizeMB: number;
   targetQuality: number;
+  retentionMonths: number;
+  enableDeleteOldImages: boolean;
+  maxApiCalls: number;
+  batchSize: number;
 }
