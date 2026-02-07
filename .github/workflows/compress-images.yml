@@ -1,0 +1,31 @@
+name: Kintone画像圧縮バッチ
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # 毎日 JST 12:00 (UTC 3:00)
+  workflow_dispatch: # 手動実行
+
+jobs:
+  compress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: 画像圧縮バッチ実行
+        run: npx tsx src/index.ts
+        env:
+          KINTONE_BASE_URL: ${{ secrets.KINTONE_BASE_URL }}
+          KINTONE_API_TOKEN: ${{ secrets.KINTONE_API_TOKEN }}
+          KINTONE_APP_ID: ${{ secrets.KINTONE_APP_ID }}
+          KINTONE_ATTACHMENT_FIELD: ${{ secrets.KINTONE_ATTACHMENT_FIELD }}
+          MAX_FILE_SIZE_MB: ${{ vars.MAX_FILE_SIZE_MB || '1' }}
+          TARGET_QUALITY: ${{ vars.TARGET_QUALITY || '80' }}
