@@ -44,7 +44,7 @@ export interface Config {
   baseUrl: string;
   apiToken: string;
   appId: string;
-  attachmentField: string;
+  attachmentFields: string[];
   maxFileSizeMB: number;
   targetQuality: number;
   retentionMonths: number;

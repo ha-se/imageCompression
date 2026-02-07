@@ -22,15 +22,16 @@ export async function deleteOldImages(
   apiCounter: ApiCounter
 ): Promise<{ results: DeleteResult[]; stoppedByApiLimit: boolean }> {
   const cutoffDate = getCutoffDate(config.retentionMonths);
-  const fieldCode = config.attachmentField;
+  const fieldCodes = config.attachmentFields;
 
   console.log(`=== 古い画像の削除 開始 ===`);
   console.log(`保持期間: ${config.retentionMonths}ヶ月`);
   console.log(`基準日: ${cutoffDate} より前のレコードが対象`);
+  console.log(`対象フィールド: ${fieldCodes.join(", ")}`);
   console.log();
 
   const query = `作成日時 < "${cutoffDate}" order by $id asc`;
-  const records = await client.getAllRecords(query, ["$id", fieldCode]);
+  const records = await client.getAllRecords(query, ["$id", ...fieldCodes]);
 
   console.log(`対象レコード数: ${records.length}`);
 
@@ -39,57 +40,69 @@ export async function deleteOldImages(
   let stoppedByApiLimit = false;
 
   for (const record of records) {
-    // API上限チェック（レコード更新に1回必要）
-    if (!apiCounter.hasCapacity(1)) {
-      console.log(
-        `API呼出上限に達したため削除処理を中断しました (${apiCounter.current}/${config.maxApiCalls})`
-      );
-      stoppedByApiLimit = true;
-      break;
-    }
-
     const recordId = record.$id.value;
-    const files = KintoneClient.extractFiles(record, fieldCode);
+    let recordHasDeleted = false;
 
-    if (files.length === 0) continue;
-
-    // 画像と非画像を分離
-    const imageFiles = files.filter((f) => isImageFile(f.name));
-    const nonImageFiles = files.filter((f) => !isImageFile(f.name));
-
-    // 画像ファイルがなければスキップ
-    if (imageFiles.length === 0) continue;
-
-    const result: DeleteResult = {
-      recordId,
-      deletedFiles: imageFiles.map((f) => f.name),
-      keptFiles: nonImageFiles.map((f) => f.name),
-    };
-
-    try {
-      // 非画像ファイルのみ残す（画像は削除）
-      const remainingFileKeys = nonImageFiles.map((f) => ({
-        fileKey: f.fileKey,
-      }));
-      await client.updateRecord(recordId, fieldCode, remainingFileKeys);
-
-      totalDeleted += imageFiles.length;
-      console.log(
-        `  レコード#${recordId}: ${imageFiles.map((f) => f.name).join(", ")} を削除`
-      );
-      if (nonImageFiles.length > 0) {
+    for (const fieldCode of fieldCodes) {
+      // API上限チェック（レコード更新に1回必要）
+      if (!apiCounter.hasCapacity(1)) {
         console.log(
-          `    保持: ${nonImageFiles.map((f) => f.name).join(", ")}`
+          `API呼出上限に達したため削除処理を中断しました (${apiCounter.current}/${config.maxApiCalls})`
+        );
+        stoppedByApiLimit = true;
+        break;
+      }
+
+      const files = KintoneClient.extractFiles(record, fieldCode);
+
+      if (files.length === 0) continue;
+
+      // 画像と非画像を分離
+      const imageFiles = files.filter((f) => isImageFile(f.name));
+      const nonImageFiles = files.filter((f) => !isImageFile(f.name));
+
+      // 画像ファイルがなければスキップ
+      if (imageFiles.length === 0) continue;
+
+      const result: DeleteResult = {
+        recordId,
+        deletedFiles: imageFiles.map((f) => f.name),
+        keptFiles: nonImageFiles.map((f) => f.name),
+      };
+
+      try {
+        // 非画像ファイルのみ残す（画像は削除）
+        const remainingFileKeys = nonImageFiles.map((f) => ({
+          fileKey: f.fileKey,
+        }));
+        await client.updateRecord(recordId, fieldCode, remainingFileKeys);
+
+        totalDeleted += imageFiles.length;
+        recordHasDeleted = true;
+        console.log(
+          `  レコード#${recordId} [${fieldCode}]: ${imageFiles.map((f) => f.name).join(", ")} を削除`
+        );
+        if (nonImageFiles.length > 0) {
+          console.log(
+            `    保持: ${nonImageFiles.map((f) => f.name).join(", ")}`
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        result.error = msg;
+        console.error(
+          `  レコード#${recordId} [${fieldCode}]: 削除失敗 - ${msg}`
         );
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      result.error = msg;
-      console.error(`  レコード#${recordId}: 削除失敗 - ${msg}`);
+
+      results.push(result);
     }
 
-    results.push(result);
-    await sleep(200);
+    if (stoppedByApiLimit) break;
+
+    if (recordHasDeleted) {
+      await sleep(200);
+    }
   }
 
   console.log();

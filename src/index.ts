@@ -15,7 +15,9 @@ function loadConfig(): Config {
     baseUrl: required("KINTONE_BASE_URL"),
     apiToken: required("KINTONE_API_TOKEN"),
     appId: required("KINTONE_APP_ID"),
-    attachmentField: required("KINTONE_ATTACHMENT_FIELD"),
+    attachmentFields: required("KINTONE_ATTACHMENT_FIELD")
+      .split(",")
+      .map((s) => s.trim()),
     maxFileSizeMB: Number(process.env.MAX_FILE_SIZE_MB ?? "1"),
     targetQuality: Number(process.env.TARGET_QUALITY ?? "80"),
     retentionMonths: Number(process.env.RETENTION_MONTHS ?? "3"),
@@ -35,17 +37,15 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runCompression(
+async function runCompressionForField(
   client: KintoneClient,
   config: Config,
-  apiCounter: ApiCounter
+  apiCounter: ApiCounter,
+  fieldCode: string
 ): Promise<{ hasErrors: boolean }> {
   const maxSizeBytes = config.maxFileSizeMB * 1024 * 1024;
-  const fieldCode = config.attachmentField;
 
-  console.log("=== Kintone画像圧縮バッチ 開始 ===");
-  console.log(`対象アプリ: ${config.appId}`);
-  console.log(`添付ファイルフィールド: ${fieldCode}`);
+  console.log(`--- フィールド: ${fieldCode} ---`);
   console.log(`圧縮閾値: ${config.maxFileSizeMB}MB`);
   if (config.batchSize > 0) {
     console.log(`バッチサイズ: ${config.batchSize}件`);
@@ -215,9 +215,27 @@ async function main(): Promise<void> {
     console.log();
   }
 
-  // Phase 2: 画像圧縮
-  const compressResult = await runCompression(client, config, apiCounter);
-  if (compressResult.hasErrors) hasErrors = true;
+  // Phase 2: 画像圧縮（各フィールドごと）
+  console.log("=== Kintone画像圧縮バッチ 開始 ===");
+  console.log(`対象アプリ: ${config.appId}`);
+  console.log(`添付ファイルフィールド: ${config.attachmentFields.join(", ")}`);
+  console.log();
+
+  for (const fieldCode of config.attachmentFields) {
+    if (!apiCounter.hasCapacity(3)) {
+      console.log(
+        `API呼出上限に達したため残りのフィールドをスキップします (${apiCounter.current}/${config.maxApiCalls})`
+      );
+      break;
+    }
+    const compressResult = await runCompressionForField(
+      client,
+      config,
+      apiCounter,
+      fieldCode
+    );
+    if (compressResult.hasErrors) hasErrors = true;
+  }
 
   console.log("=== 完了 ===");
 
