@@ -2,7 +2,7 @@ name: Kintone画像圧縮バッチ
 
 on:
   schedule:
-    - cron: '0 3 * * *' # 毎日 JST 12:00 (UTC 3:00)
+    - cron: '0 21 * * *' # 毎日 JST 6:00 (UTC 21:00)
   workflow_dispatch: # 手動実行
 
 jobs:
