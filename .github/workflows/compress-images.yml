@@ -72,7 +72,7 @@ jobs:
       - name: LAST_PROCESSED_ID を更新
         if: steps.batch.outputs.last_processed_id != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           gh variable set LAST_PROCESSED_ID --body "${{ steps.batch.outputs.last_processed_id }}"
           echo "LAST_PROCESSED_ID を ${{ steps.batch.outputs.last_processed_id }} に更新しました"
