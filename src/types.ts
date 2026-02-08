@@ -51,4 +51,5 @@ export interface Config {
   enableDeleteOldImages: boolean;
   maxApiCalls: number;
   batchSize: number;
+  lastProcessedId: string;
 }

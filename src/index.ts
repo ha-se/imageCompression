@@ -24,6 +24,7 @@ function loadConfig(): Config {
     enableDeleteOldImages: process.env.ENABLE_DELETE_OLD_IMAGES === "true",
     maxApiCalls: Number(process.env.MAX_API_CALLS ?? "9000"),
     batchSize: Number(process.env.BATCH_SIZE ?? "0"),
+    lastProcessedId: process.env.LAST_PROCESSED_ID ?? "",
   };
 }
 
@@ -37,25 +38,35 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runCompressionForField(
+async function runCompression(
   client: KintoneClient,
   config: Config,
-  apiCounter: ApiCounter,
-  fieldCode: string
+  apiCounter: ApiCounter
 ): Promise<{ hasErrors: boolean }> {
   const maxSizeBytes = config.maxFileSizeMB * 1024 * 1024;
+  const fieldCodes = config.attachmentFields;
 
-  console.log(`--- フィールド: ${fieldCode} ---`);
+  console.log(`対象フィールド: ${fieldCodes.join(", ")}`);
   console.log(`圧縮閾値: ${config.maxFileSizeMB}MB`);
   if (config.batchSize > 0) {
     console.log(`バッチサイズ: ${config.batchSize}件`);
   }
+
+  // 差分取得: LAST_PROCESSED_ID が設定されている場合、それより大きいIDのレコードのみ取得
+  const isIncrementalMode = config.lastProcessedId !== "";
+  if (isIncrementalMode) {
+    console.log(`差分モード: $id > ${config.lastProcessedId} のレコードのみ取得`);
+  } else {
+    console.log("フルスキャンモード: 全レコードを取得");
+  }
   console.log();
 
-  const records = await client.getAllRecords("", [
-    "$id",
-    fieldCode,
-  ]);
+  // 全フィールドをまとめて1回で取得
+  const query = isIncrementalMode
+    ? `$id > "${config.lastProcessedId}"`
+    : "";
+  const fields = ["$id", ...fieldCodes];
+  const records = await client.getAllRecords(query, fields);
   console.log(`取得レコード数: ${records.length}`);
 
   const results: ProcessResult[] = [];
@@ -63,6 +74,7 @@ async function runCompressionForField(
   let totalSaved = 0;
   let processedCount = 0;
   let stoppedByApiLimit = false;
+  let maxId = "0";
 
   for (const record of records) {
     // バッチサイズ制限チェック
@@ -81,15 +93,24 @@ async function runCompressionForField(
     }
 
     const recordId = record.$id.value;
-    const files = KintoneClient.extractFiles(record, fieldCode);
 
-    if (files.length === 0) continue;
+    // 最大IDを追跡
+    if (Number(recordId) > Number(maxId)) {
+      maxId = recordId;
+    }
 
-    // Check if any file needs compression
-    const needsCompression = files.some(
-      (f) => isImageFile(f.name) && Number(f.size) > maxSizeBytes
-    );
-    if (!needsCompression) continue;
+    // 全フィールドの添付ファイルを確認
+    let recordNeedsCompression = false;
+    for (const fieldCode of fieldCodes) {
+      const files = KintoneClient.extractFiles(record, fieldCode);
+      if (
+        files.some((f) => isImageFile(f.name) && Number(f.size) > maxSizeBytes)
+      ) {
+        recordNeedsCompression = true;
+        break;
+      }
+    }
+    if (!recordNeedsCompression) continue;
 
     const result: ProcessResult = {
       recordId,
@@ -98,67 +119,80 @@ async function runCompressionForField(
       errors: [],
     };
 
-    const updatedFileKeys: Array<{ fileKey: string }> = [];
-    let recordModified = false;
+    // フィールドごとに圧縮処理
+    for (const fieldCode of fieldCodes) {
+      const files = KintoneClient.extractFiles(record, fieldCode);
+      if (files.length === 0) continue;
 
-    for (const file of files) {
-      const fileSize = Number(file.size);
+      const needsCompression = files.some(
+        (f) => isImageFile(f.name) && Number(f.size) > maxSizeBytes
+      );
+      if (!needsCompression) continue;
 
-      // Skip non-image or already small files
-      if (!isImageFile(file.name) || fileSize <= maxSizeBytes) {
-        updatedFileKeys.push({ fileKey: file.fileKey });
-        result.skipped++;
-        continue;
-      }
+      const updatedFileKeys: Array<{ fileKey: string }> = [];
+      let fieldModified = false;
 
-      try {
-        console.log(
-          `  レコード#${recordId}: ${file.name} (${formatSize(fileSize)}) を圧縮中...`
-        );
+      for (const file of files) {
+        const fileSize = Number(file.size);
 
-        const buffer = await client.downloadFile(file.fileKey);
-        const compressed = await compressToBuffer(
-          buffer,
-          file.name,
-          maxSizeBytes,
-          config.targetQuality
-        );
-
-        if (compressed) {
-          const uploaded = await client.uploadFile(
-            compressed.result.newName,
-            compressed.data
-          );
-          updatedFileKeys.push({ fileKey: uploaded.fileKey });
-          result.files.push(compressed.result);
-          recordModified = true;
-          totalCompressed++;
-          totalSaved +=
-            compressed.result.originalSize - compressed.result.compressedSize;
-
-          console.log(
-            `    -> ${compressed.result.newName} (${formatSize(compressed.result.compressedSize)}) に圧縮完了`
-          );
-        } else {
+        // Skip non-image or already small files
+        if (!isImageFile(file.name) || fileSize <= maxSizeBytes) {
           updatedFileKeys.push({ fileKey: file.fileKey });
           result.skipped++;
+          continue;
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        result.errors.push(`${file.name}: ${msg}`);
-        updatedFileKeys.push({ fileKey: file.fileKey });
-        console.error(`    エラー: ${file.name} - ${msg}`);
-      }
-    }
 
-    if (recordModified) {
-      try {
-        await client.updateRecord(recordId, fieldCode, updatedFileKeys);
-        console.log(`  レコード#${recordId}: 更新完了`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        result.errors.push(`レコード更新失敗: ${msg}`);
-        console.error(`  レコード#${recordId}: 更新失敗 - ${msg}`);
+        try {
+          console.log(
+            `  レコード#${recordId} [${fieldCode}]: ${file.name} (${formatSize(fileSize)}) を圧縮中...`
+          );
+
+          const buffer = await client.downloadFile(file.fileKey);
+          const compressed = await compressToBuffer(
+            buffer,
+            file.name,
+            maxSizeBytes,
+            config.targetQuality
+          );
+
+          if (compressed) {
+            const uploaded = await client.uploadFile(
+              compressed.result.newName,
+              compressed.data
+            );
+            updatedFileKeys.push({ fileKey: uploaded.fileKey });
+            result.files.push(compressed.result);
+            fieldModified = true;
+            totalCompressed++;
+            totalSaved +=
+              compressed.result.originalSize - compressed.result.compressedSize;
+
+            console.log(
+              `    -> ${compressed.result.newName} (${formatSize(compressed.result.compressedSize)}) に圧縮完了`
+            );
+          } else {
+            updatedFileKeys.push({ fileKey: file.fileKey });
+            result.skipped++;
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          result.errors.push(`${fieldCode}/${file.name}: ${msg}`);
+          updatedFileKeys.push({ fileKey: file.fileKey });
+          console.error(`    エラー: ${file.name} - ${msg}`);
+        }
+      }
+
+      if (fieldModified) {
+        try {
+          await client.updateRecord(recordId, fieldCode, updatedFileKeys);
+          console.log(`  レコード#${recordId} [${fieldCode}]: 更新完了`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          result.errors.push(`${fieldCode} レコード更新失敗: ${msg}`);
+          console.error(
+            `  レコード#${recordId} [${fieldCode}]: 更新失敗 - ${msg}`
+          );
+        }
       }
     }
 
@@ -179,6 +213,11 @@ async function runCompressionForField(
 
   if (stoppedByApiLimit) {
     console.log("※ API上限により中断 — 残りは次回実行時に処理されます");
+  }
+
+  // 最大IDを出力（GitHub Actionsで変数更新に使用）
+  if (records.length > 0) {
+    console.log(`LAST_PROCESSED_ID=${maxId}`);
   }
 
   const errorCount = results.reduce((sum, r) => sum + r.errors.length, 0);
@@ -215,27 +254,13 @@ async function main(): Promise<void> {
     console.log();
   }
 
-  // Phase 2: 画像圧縮（各フィールドごと）
+  // Phase 2: 画像圧縮（全フィールドをレコード単位で処理）
   console.log("=== Kintone画像圧縮バッチ 開始 ===");
   console.log(`対象アプリ: ${config.appId}`);
-  console.log(`添付ファイルフィールド: ${config.attachmentFields.join(", ")}`);
   console.log();
 
-  for (const fieldCode of config.attachmentFields) {
-    if (!apiCounter.hasCapacity(3)) {
-      console.log(
-        `API呼出上限に達したため残りのフィールドをスキップします (${apiCounter.current}/${config.maxApiCalls})`
-      );
-      break;
-    }
-    const compressResult = await runCompressionForField(
-      client,
-      config,
-      apiCounter,
-      fieldCode
-    );
-    if (compressResult.hasErrors) hasErrors = true;
-  }
+  const compressResult = await runCompression(client, config, apiCounter);
+  if (compressResult.hasErrors) hasErrors = true;
 
   console.log("=== 完了 ===");
 
