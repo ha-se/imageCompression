@@ -23,7 +23,7 @@ function loadConfig(): Config {
     retentionMonths: Number(process.env.RETENTION_MONTHS ?? "3"),
     enableDeleteOldImages: process.env.ENABLE_DELETE_OLD_IMAGES === "true",
     maxApiCalls: Number(process.env.MAX_API_CALLS ?? "9000"),
-    batchSize: Number(process.env.BATCH_SIZE ?? "0"),
+    batchSize: Number(process.env.BATCH_SIZE ?? "500"),
     lastProcessedId: process.env.LAST_PROCESSED_ID ?? "",
   };
 }
@@ -74,9 +74,11 @@ async function runCompression(
   let totalSaved = 0;
   let processedCount = 0;
   let stoppedByApiLimit = false;
-  let maxId = "0";
+  let lastCheckedId = "";
 
   for (const record of records) {
+    const recordId = record.$id.value;
+
     // バッチサイズ制限チェック
     if (config.batchSize > 0 && processedCount >= config.batchSize) {
       console.log(`バッチサイズ上限 (${config.batchSize}件) に達しました`);
@@ -92,12 +94,9 @@ async function runCompression(
       break;
     }
 
-    const recordId = record.$id.value;
-
-    // 最大IDを追跡
-    if (Number(recordId) > Number(maxId)) {
-      maxId = recordId;
-    }
+    // 走査済みIDを更新（圧縮不要でもカウント）
+    lastCheckedId = recordId;
+    processedCount++;
 
     // 全フィールドの添付ファイルを確認
     let recordNeedsCompression = false;
@@ -197,7 +196,6 @@ async function runCompression(
     }
 
     results.push(result);
-    processedCount++;
 
     // Rate limiting: wait between records to avoid hitting API limits
     await sleep(200);
@@ -215,9 +213,9 @@ async function runCompression(
     console.log("※ API上限により中断 — 残りは次回実行時に処理されます");
   }
 
-  // 最大IDを出力（GitHub Actionsで変数更新に使用）
-  if (records.length > 0) {
-    console.log(`LAST_PROCESSED_ID=${maxId}`);
+  // 走査済み最大IDを出力（GitHub Actionsで変数更新に使用）
+  if (lastCheckedId) {
+    console.log(`LAST_PROCESSED_ID=${lastCheckedId}`);
   }
 
   const errorCount = results.reduce((sum, r) => sum + r.errors.length, 0);

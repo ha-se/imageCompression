@@ -8,7 +8,7 @@ on:
       batch_size:
         description: '処理レコード上限 (0 = 無制限)'
         required: false
-        default: '0'
+        default: '500'
       enable_delete:
         description: '古い画像の削除を有効化'
         required: false
@@ -66,7 +66,7 @@ jobs:
           RETENTION_MONTHS: ${{ vars.RETENTION_MONTHS || '3' }}
           ENABLE_DELETE_OLD_IMAGES: ${{ github.event.inputs.enable_delete || vars.ENABLE_DELETE_OLD_IMAGES || 'false' }}
           MAX_API_CALLS: ${{ vars.MAX_API_CALLS || '9000' }}
-          BATCH_SIZE: ${{ github.event.inputs.batch_size || vars.BATCH_SIZE || '0' }}
+          BATCH_SIZE: ${{ github.event.inputs.batch_size || vars.BATCH_SIZE || '500' }}
           LAST_PROCESSED_ID: ${{ github.event.inputs.full_scan == 'true' && '' || vars.LAST_PROCESSED_ID || '' }}
 
       - name: LAST_PROCESSED_ID を更新
