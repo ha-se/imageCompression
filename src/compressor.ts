@@ -39,17 +39,17 @@ export async function compressToBuffer(
 
   let data: Buffer | undefined;
 
-  // Phase 1: quality reduction only
+  // Phase 1: quality reduction only（.rotate() で EXIF orientation を適用し天地逆を防ぐ）
   for (const quality of QUALITY_STEPS) {
     if (quality > startQuality) continue;
-    data = await sharp(buffer).jpeg({ quality }).toBuffer();
+    data = await sharp(buffer).rotate().jpeg({ quality }).toBuffer();
     if (data.length <= maxSizeBytes) {
       return makeResult(data, originalSize, fileName);
     }
   }
 
-  // Phase 2: resize + lowest quality
-  const metadata = await sharp(buffer).metadata();
+  // Phase 2: resize + lowest quality（回転適用後のメタデータでリサイズ）
+  const metadata = await sharp(buffer).rotate().metadata();
   const longestSide = Math.max(metadata.width ?? 0, metadata.height ?? 0);
 
   for (const maxDimension of RESIZE_STEPS) {
@@ -61,6 +61,7 @@ export async function compressToBuffer(
         : { height: maxDimension };
 
     data = await sharp(buffer)
+      .rotate()
       .resize(resizeOpts)
       .jpeg({ quality: QUALITY_STEPS[QUALITY_STEPS.length - 1] })
       .toBuffer();
