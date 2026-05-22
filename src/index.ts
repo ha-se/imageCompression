@@ -38,7 +38,7 @@ function loadConfig(): Config {
     awsRegion:
       process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "ap-northeast-1",
     maxApiCalls: Number(process.env.MAX_API_CALLS ?? "9000"),
-    batchSize: Number(process.env.BATCH_SIZE ?? "500"),
+    batchSize: Number(process.env.BATCH_SIZE ?? "100"),
     lastProcessedId: process.env.LAST_PROCESSED_ID ?? "",
     archiveQuery: process.env.ARCHIVE_QUERY ?? "",
   };

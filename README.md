@@ -69,7 +69,7 @@ npm start
 | `S3_PREFIX` | 空 | S3 オブジェクトキーの先頭に付けるプレフィックス |
 | `AWS_REGION` | `ap-northeast-1` | S3 バケットのリージョン |
 | `MAX_API_CALLS` | `9000` | 1 回の実行で許可する API 呼び出し数 |
-| `BATCH_SIZE` | `500` | 1 回の実行で走査するレコード数。`0` で無制限 |
+| `BATCH_SIZE` | `100` | 1 回の実行で走査するレコード数。`0` で無制限 |
 | `LAST_PROCESSED_ID` | 空 | 指定時は `$id` がこの値より大きいレコードのみ処理する |
 | `ARCHIVE_QUERY` | 空 | アーカイブ/削除対象を上書きする Kintone クエリ。空の場合は `RETENTION_MONTHS` で判定 |
 
