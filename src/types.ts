@@ -40,6 +40,23 @@ export interface DeleteResult {
   error?: string;
 }
 
+export interface ArchiveResult {
+  recordId: string;
+  archivedFiles: string[];
+  keptFiles: string[];
+  s3Keys: string[];
+  error?: string;
+}
+
+export interface ArchiveRecordResult {
+  recordId: string;
+  recordJsonKey?: string;
+  archivedFiles: string[];
+  s3Keys: string[];
+  deleted: boolean;
+  error?: string;
+}
+
 export interface Config {
   baseUrl: string;
   apiToken: string;
@@ -49,7 +66,13 @@ export interface Config {
   targetQuality: number;
   retentionMonths: number;
   enableDeleteOldImages: boolean;
+  enableArchiveOldImages: boolean;
+  enableArchiveOldRecords: boolean;
+  s3Bucket: string;
+  s3Prefix: string;
+  awsRegion: string;
   maxApiCalls: number;
   batchSize: number;
   lastProcessedId: string;
+  archiveQuery: string;
 }

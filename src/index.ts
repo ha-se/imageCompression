@@ -1,7 +1,10 @@
 import { ApiCounter } from "./api-counter.js";
+import { archiveOldImages } from "./archive-old-images.js";
+import { archiveOldRecords } from "./archive-old-records.js";
 import { compressToBuffer, isImageFile } from "./compressor.js";
 import { deleteOldImages } from "./delete-old-images.js";
 import { KintoneClient } from "./kintone-client.js";
+import { S3ArchiveClient } from "./s3-client.js";
 import type { Config, ProcessResult } from "./types.js";
 
 function loadConfig(): Config {
@@ -22,9 +25,22 @@ function loadConfig(): Config {
     targetQuality: Number(process.env.TARGET_QUALITY ?? "80"),
     retentionMonths: Number(process.env.RETENTION_MONTHS ?? "3"),
     enableDeleteOldImages: process.env.ENABLE_DELETE_OLD_IMAGES === "true",
+    enableArchiveOldImages:
+      process.env.ENABLE_ARCHIVE_OLD_IMAGES === "true",
+    enableArchiveOldRecords:
+      process.env.ENABLE_ARCHIVE_OLD_RECORDS === "true",
+    s3Bucket:
+      process.env.ENABLE_ARCHIVE_OLD_IMAGES === "true" ||
+      process.env.ENABLE_ARCHIVE_OLD_RECORDS === "true"
+        ? required("S3_BUCKET")
+        : process.env.S3_BUCKET ?? "",
+    s3Prefix: process.env.S3_PREFIX ?? "",
+    awsRegion:
+      process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "ap-northeast-1",
     maxApiCalls: Number(process.env.MAX_API_CALLS ?? "9000"),
     batchSize: Number(process.env.BATCH_SIZE ?? "500"),
     lastProcessedId: process.env.LAST_PROCESSED_ID ?? "",
+    archiveQuery: process.env.ARCHIVE_QUERY ?? "",
   };
 }
 
@@ -237,8 +253,44 @@ async function main(): Promise<void> {
   const client = new KintoneClient(config, apiCounter);
   let hasErrors = false;
 
-  // Phase 1: 古い画像の削除（有効時のみ）
-  if (config.enableDeleteOldImages) {
+  // Phase 1: 古いレコード/画像のアーカイブまたは削除（有効時のみ）
+  if (config.enableArchiveOldRecords) {
+    const s3Client = new S3ArchiveClient(config);
+    const archiveResult = await archiveOldRecords(
+      client,
+      s3Client,
+      config,
+      apiCounter
+    );
+    const archiveErrors = archiveResult.results.filter((r) => r.error).length;
+    if (archiveErrors > 0) hasErrors = true;
+
+    if (archiveResult.stoppedByApiLimit) {
+      console.log();
+      console.log("API上限により圧縮処理はスキップします");
+      console.log("=== 完了 ===");
+      process.exit(hasErrors ? 1 : 0);
+    }
+    console.log();
+  } else if (config.enableArchiveOldImages) {
+    const s3Client = new S3ArchiveClient(config);
+    const archiveResult = await archiveOldImages(
+      client,
+      s3Client,
+      config,
+      apiCounter
+    );
+    const archiveErrors = archiveResult.results.filter((r) => r.error).length;
+    if (archiveErrors > 0) hasErrors = true;
+
+    if (archiveResult.stoppedByApiLimit) {
+      console.log();
+      console.log("API上限により圧縮処理はスキップします");
+      console.log("=== 完了 ===");
+      process.exit(hasErrors ? 1 : 0);
+    }
+    console.log();
+  } else if (config.enableDeleteOldImages) {
     const deleteResult = await deleteOldImages(client, config, apiCounter);
     const deleteErrors = deleteResult.results.filter((r) => r.error).length;
     if (deleteErrors > 0) hasErrors = true;

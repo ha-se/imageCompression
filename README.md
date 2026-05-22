@@ -13,6 +13,8 @@ Kintone の添付ファイルフィールドにある画像を自動で圧縮す
 - `$id` ベースのページングで 10,000 件超のレコード取得に対応
 - `LAST_PROCESSED_ID` による差分実行
 - API 呼び出し上限とバッチサイズによる実行制御
+- 古いレコードの JSON と画像を S3 にアーカイブしてから Kintone レコードを削除
+- 古いレコードの画像添付を S3 に退避してから Kintone から削除
 - 古いレコードの画像添付削除
 - GitHub Actions による定期実行
 
@@ -60,10 +62,16 @@ npm start
 | `MAX_FILE_SIZE_MB` | `1` | このサイズを超える画像を圧縮対象にする |
 | `TARGET_QUALITY` | `80` | 圧縮開始時の JPEG 品質 |
 | `RETENTION_MONTHS` | `3` | 古い画像削除時に保持する月数 |
+| `ENABLE_ARCHIVE_OLD_RECORDS` | `false` | `true` の場合、古いレコードの JSON と画像を S3 に保存してから Kintone レコードを削除する |
+| `ENABLE_ARCHIVE_OLD_IMAGES` | `false` | `true` の場合、古い画像を S3 に退避してから Kintone から削除する |
 | `ENABLE_DELETE_OLD_IMAGES` | `false` | `true` の場合、圧縮前に古い画像を削除する |
+| `S3_BUCKET` | 空 | S3 退避先バケット名。S3 アーカイブ機能を使う場合は必須 |
+| `S3_PREFIX` | 空 | S3 オブジェクトキーの先頭に付けるプレフィックス |
+| `AWS_REGION` | `ap-northeast-1` | S3 バケットのリージョン |
 | `MAX_API_CALLS` | `9000` | 1 回の実行で許可する API 呼び出し数 |
 | `BATCH_SIZE` | `500` | 1 回の実行で走査するレコード数。`0` で無制限 |
 | `LAST_PROCESSED_ID` | 空 | 指定時は `$id` がこの値より大きいレコードのみ処理する |
+| `ARCHIVE_QUERY` | 空 | アーカイブ/削除対象を上書きする Kintone クエリ。空の場合は `RETENTION_MONTHS` で判定 |
 
 `.env` ファイルは `.gitignore` に含まれていますが、このツール自体は `.env` を自動読み込みしません。ローカルで使う場合は、シェルや実行環境から環境変数を渡してください。
 
@@ -105,11 +113,55 @@ LAST_PROCESSED_ID=12345
 
 GitHub Actions ではこの値を読み取り、repository variable の `LAST_PROCESSED_ID` を更新します。
 
-## 古い画像の削除
+## 古いレコードの S3 アーカイブ
+
+`ENABLE_ARCHIVE_OLD_RECORDS=true` の場合、圧縮処理の前に古い Kintone レコードを S3 にアーカイブし、アーカイブに成功したあと Kintone からレコード自体を削除します。
+
+削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。S3 には、レコード JSON 全体と、対象添付フィールド内の画像ファイルを別々に保存します。
+
+テストなどで対象期間を明示したい場合は、`ARCHIVE_QUERY` で Kintone クエリを指定できます。たとえば 2025年分だけを対象にする場合は、以下を指定します。
+
+```text
+作成日時 >= "2025-01-01" and 作成日時 < "2026-01-01"
+```
+
+保存されるレコード JSON:
+
+```text
+{S3_PREFIX}/kintone/app-{appId}/record-{recordId}/record.json
+```
+
+保存される画像:
+
+```text
+{S3_PREFIX}/kintone/app-{appId}/record-{recordId}/{fieldCode}/{fileKey}-{fileName}
+```
+
+`record.json` には Kintone レコード全体に加えて、S3 に保存した画像の `bucket`、`key`、`s3Uri`、元ファイル名、元 `fileKey`、`contentType`、`size` が含まれます。
+
+処理順序は、画像保存、画像の S3 URI を含むレコード JSON 保存、Kintone レコード削除です。途中で失敗した場合、Kintone レコードは削除しません。
+
+## 古い画像の S3 退避
+
+`ENABLE_ARCHIVE_OLD_IMAGES=true` の場合、圧縮処理の前に古いレコードの画像添付を S3 に退避し、退避に成功したあと Kintone の添付ファイルフィールドから削除します。
+
+削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。対象フィールド内の画像ファイルだけを S3 に保存して Kintone から削除し、非画像ファイルは Kintone に残します。
+
+S3 のオブジェクトキーは、以下の形式で作成されます。
+
+```text
+{S3_PREFIX}/kintone/app-{appId}/record-{recordId}/{fieldCode}/{fileKey}-{fileName}
+```
+
+`S3_PREFIX` が空の場合、先頭の `{S3_PREFIX}/` は付きません。S3 へのアップロードには AWS SDK の標準認証チェーンを使います。GitHub Actions では `AWS_ACCESS_KEY_ID` と `AWS_SECRET_ACCESS_KEY` を Secrets に設定してください。
+
+## 古い画像の削除のみ
 
 `ENABLE_DELETE_OLD_IMAGES=true` の場合、圧縮処理の前に古いレコードの画像添付を削除します。
 
 削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。対象フィールド内の画像ファイルだけを削除し、非画像ファイルは残します。
+
+`ENABLE_ARCHIVE_OLD_RECORDS=true` の場合はレコードアーカイブが最優先されます。`ENABLE_ARCHIVE_OLD_IMAGES=true` の場合は画像退避が次に優先され、`ENABLE_DELETE_OLD_IMAGES` は実行されません。
 
 ## GitHub Actions
 
@@ -124,6 +176,9 @@ GitHub Actions ではこの値を読み取り、repository variable の `LAST_PR
 | `KINTONE_APP_ID` | 対象アプリ ID |
 | `KINTONE_ATTACHMENT_FIELD` | 添付ファイルフィールドコード |
 | `PAT_TOKEN` | `LAST_PROCESSED_ID` の repository variable 更新に使う GitHub token |
+| `S3_BUCKET` | S3 アーカイブ先バケット名 |
+| `AWS_ACCESS_KEY_ID` | S3 書き込み権限を持つ AWS アクセスキー |
+| `AWS_SECRET_ACCESS_KEY` | S3 書き込み権限を持つ AWS シークレットアクセスキー |
 
 主な GitHub Variables:
 
@@ -132,7 +187,11 @@ GitHub Actions ではこの値を読み取り、repository variable の `LAST_PR
 | `MAX_FILE_SIZE_MB` | 圧縮対象サイズ |
 | `TARGET_QUALITY` | JPEG 品質 |
 | `RETENTION_MONTHS` | 古い画像の保持月数 |
+| `ENABLE_ARCHIVE_OLD_RECORDS` | 古いレコードの S3 アーカイブと Kintone レコード削除の有効化 |
+| `ENABLE_ARCHIVE_OLD_IMAGES` | 古い画像の S3 退避の有効化 |
 | `ENABLE_DELETE_OLD_IMAGES` | 古い画像削除の有効化 |
+| `S3_PREFIX` | S3 オブジェクトキーのプレフィックス |
+| `AWS_REGION` | S3 バケットのリージョン |
 | `MAX_API_CALLS` | API 呼び出し上限 |
 | `BATCH_SIZE` | バッチサイズ |
 | `LAST_PROCESSED_ID` | 差分実行の開始位置 |
@@ -140,15 +199,19 @@ GitHub Actions ではこの値を読み取り、repository variable の `LAST_PR
 手動実行時は、以下を指定できます。
 
 - `batch_size`: 処理レコード上限
+- `enable_record_archive`: 古いレコード全体を S3 へアーカイブして Kintone から削除
+- `enable_archive`: 古い画像を S3 へ退避して Kintone から削除
 - `enable_delete`: 古い画像削除の有効化
 - `full_scan`: 差分モードを無効化して全件走査
 - `timeout`: タイムアウト分数
+- `archive_query`: アーカイブ/削除対象の Kintone クエリ。空なら保持期間で判定
 
 ## 注意事項
 
 - 圧縮後のファイル名は拡張子が `.jpg` になります。
 - Kintone の添付ファイル差し替えはフィールド単位で行われます。
 - 圧縮対象外のファイルは元の `fileKey` を維持します。
+- レコードアーカイブ機能は、レコード JSON と画像の S3 保存に成功したあとで Kintone レコードを削除します。
+- S3 退避機能は、対象画像のアップロードに成功したあとで Kintone から画像を外します。
 - 画像削除機能は、対象フィールド内の画像添付をレコードから外します。実行前に対象条件を確認してください。
 - API 呼び出し数が上限に近づくと処理を中断します。残りは次回実行で処理されます。
-

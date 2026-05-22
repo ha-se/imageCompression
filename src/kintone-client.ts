@@ -32,14 +32,16 @@ export class KintoneClient {
 
   private async fetchRecords(
     query: string,
-    fields: string[]
+    fields: string[] | null
   ): Promise<KintoneGetRecordsResponse> {
     const params = new URLSearchParams({
       app: this.appId,
       query,
     });
-    for (const f of fields) {
-      params.append("fields[]", f);
+    if (fields) {
+      for (const f of fields) {
+        params.append("fields[]", f);
+      }
     }
 
     const res = await fetch(
@@ -77,6 +79,27 @@ export class KintoneClient {
         : `${idCondition} order by $id asc limit ${limit}`;
 
       const res = await this.fetchRecords(fullQuery, fieldsWithId);
+      all.push(...res.records);
+      if (res.records.length < limit) break;
+
+      lastId = res.records[res.records.length - 1].$id.value;
+    }
+
+    return all;
+  }
+
+  async getAllRecordsWithAllFields(query: string): Promise<KintoneRecord[]> {
+    const all: KintoneRecord[] = [];
+    let lastId = "0";
+    const limit = 500;
+
+    while (true) {
+      const idCondition = `$id > "${lastId}"`;
+      const fullQuery = query
+        ? `${idCondition} and (${query}) order by $id asc limit ${limit}`
+        : `${idCondition} order by $id asc limit ${limit}`;
+
+      const res = await this.fetchRecords(fullQuery, null);
       all.push(...res.records);
       if (res.records.length < limit) break;
 
@@ -152,6 +175,25 @@ export class KintoneClient {
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Failed to update record: ${res.status} ${text}`);
+    }
+  }
+
+  async deleteRecord(recordId: string): Promise<void> {
+    const body = {
+      app: this.appId,
+      ids: [recordId],
+    };
+
+    const res = await fetch(`${this.baseUrl}/k/v1/records.json`, {
+      method: "DELETE",
+      headers: this.headers("application/json"),
+      body: JSON.stringify(body),
+    });
+    this.apiCounter?.increment();
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Failed to delete record: ${res.status} ${text}`);
     }
   }
 
