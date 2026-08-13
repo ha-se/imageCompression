@@ -1,0 +1,26 @@
+name: Kintoneフィールド一覧確認
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  list-fields:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: フィールド一覧取得
+        run: npx tsx src/list-fields.ts
+        env:
+          KINTONE_BASE_URL: ${{ secrets.KINTONE_BASE_URL }}
+          KINTONE_API_TOKEN: ${{ secrets.KINTONE_API_TOKEN }}
+          KINTONE_APP_ID: ${{ secrets.KINTONE_APP_ID }}
