@@ -51,7 +51,9 @@ export class S3ArchiveClient {
         Metadata: {
           appId: this.appId,
           recordId: params.recordId,
-          fieldCode: params.fieldCode,
+          // S3メタデータはHTTPヘッダーに載るため、日本語などの非ASCII文字を
+          // 含むフィールドコード（例: その他報告写真）はエンコードが必須。
+          fieldCode: encodeURIComponent(params.fieldCode),
           originalFileName: encodeURIComponent(params.file.name),
           originalFileKey: params.file.fileKey,
         },
