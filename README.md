@@ -11,7 +11,7 @@ Kintone の添付ファイルフィールドにある画像を自動で圧縮す
 - JPEG / PNG / HEIC / HEIF / WebP / AVIF / TIFF などを画像として判定
 - 画像を JPEG に変換し、品質調整とリサイズでファイルサイズを削減
 - `$id` ベースのページングで 10,000 件超のレコード取得に対応
-- `LAST_PROCESSED_ID` による差分実行
+- `LAST_PROCESSED_UPDATED_AT`（レコードの更新日時）による差分実行。既にスキャン済みのレコードに後から写真が追加・差し替えされた場合も取りこぼさない
 - API 呼び出し上限とバッチサイズによる実行制御
 - 古いレコードの JSON と画像を S3 にアーカイブしてから Kintone レコードを削除
 - 古いレコードの画像添付を S3 に退避してから Kintone から削除
@@ -70,7 +70,7 @@ npm start
 | `AWS_REGION` | `ap-northeast-1` | S3 バケットのリージョン |
 | `MAX_API_CALLS` | `9000` | 1 回の実行で許可する API 呼び出し数 |
 | `BATCH_SIZE` | `100` | 1 回の実行で走査するレコード数。`0` で無制限 |
-| `LAST_PROCESSED_ID` | 空 | 指定時は `$id` がこの値より大きいレコードのみ処理する |
+| `LAST_PROCESSED_UPDATED_AT` | 空 | 指定時は `更新日時` がこの値より後のレコードのみ処理する |
 | `ARCHIVE_QUERY` | 空 | アーカイブ/削除対象を上書きする Kintone クエリ。空の場合は `RETENTION_MONTHS` で判定 |
 
 `.env` ファイルは `.gitignore` に含まれていますが、このツール自体は `.env` を自動読み込みしません。ローカルで使う場合は、シェルや実行環境から環境変数を渡してください。
@@ -99,25 +99,34 @@ npm start
 
 ## 差分実行
 
-`LAST_PROCESSED_ID` を指定すると、以下の条件でレコードを取得します。
+`LAST_PROCESSED_UPDATED_AT` を指定すると、以下の条件でレコードを取得します。
 
 ```text
-$id > LAST_PROCESSED_ID
+更新日時 > LAST_PROCESSED_UPDATED_AT
 ```
 
-実行後、最後に走査したレコード ID がログに出力されます。
+レコードは `更新日時` の昇順で取得されます。`$id` ベースの一方向カーソルとは異なり、
+一度スキャンした後にレコードが編集されて写真が追加・差し替えされた場合も、`更新日時` が
+更新されるため次回実行時に再検出されます。
+
+実行後、最後に走査したレコードの更新日時（安全マージンとして 10 秒過去に戻した値）がログに
+出力されます。
 
 ```text
-LAST_PROCESSED_ID=12345
+LAST_PROCESSED_UPDATED_AT=2026-08-13T05:00:00Z
 ```
 
-GitHub Actions ではこの値を読み取り、repository variable の `LAST_PROCESSED_ID` を更新します。
+この安全マージンにより、同一の `更新日時` を持つレコードが取得ページの境界で取りこぼされることを
+防ぎます。境界付近のレコードは次回実行時に再スキャンされることがありますが、圧縮済みファイルは
+閾値以下になっているため即座にスキップされ、追加コストはわずかです。
+
+GitHub Actions ではこの値を読み取り、repository variable の `LAST_PROCESSED_UPDATED_AT` を更新します。
 
 ## 古いレコードの S3 アーカイブ
 
 `ENABLE_ARCHIVE_OLD_RECORDS=true` の場合、圧縮処理の前に古い Kintone レコードを S3 にアーカイブし、アーカイブに成功したあと Kintone からレコード自体を削除します。
 
-削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。S3 には、レコード JSON 全体と、対象添付フィールド内の画像ファイルを別々に保存します。
+削除対象は、`作成日時` が基準日（実行月から `RETENTION_MONTHS` ヶ月前の月の1日）より前のレコードです。例えば 8 月に `RETENTION_MONTHS=3` で実行すると、基準日は 5/1 になり、5・6・7 月分は丸ごと Kintone に残ります。S3 には、レコード JSON 全体と、対象添付フィールド内の画像ファイルを別々に保存します。
 
 テストなどで対象期間を明示したい場合は、`ARCHIVE_QUERY` で Kintone クエリを指定できます。たとえば 2025年分だけを対象にする場合は、以下を指定します。
 
@@ -145,7 +154,7 @@ GitHub Actions ではこの値を読み取り、repository variable の `LAST_PR
 
 `ENABLE_ARCHIVE_OLD_IMAGES=true` の場合、圧縮処理の前に古いレコードの画像添付を S3 に退避し、退避に成功したあと Kintone の添付ファイルフィールドから削除します。
 
-削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。対象フィールド内の画像ファイルだけを S3 に保存して Kintone から削除し、非画像ファイルは Kintone に残します。
+削除対象は、`作成日時` が基準日（実行月から `RETENTION_MONTHS` ヶ月前の月の1日）より前のレコードです。対象フィールド内の画像ファイルだけを S3 に保存して Kintone から削除し、非画像ファイルは Kintone に残します。
 
 S3 のオブジェクトキーは、以下の形式で作成されます。
 
@@ -159,13 +168,13 @@ S3 のオブジェクトキーは、以下の形式で作成されます。
 
 `ENABLE_DELETE_OLD_IMAGES=true` の場合、圧縮処理の前に古いレコードの画像添付を削除します。
 
-削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。対象フィールド内の画像ファイルだけを削除し、非画像ファイルは残します。
+削除対象は、`作成日時` が基準日（実行月から `RETENTION_MONTHS` ヶ月前の月の1日）より前のレコードです。対象フィールド内の画像ファイルだけを削除し、非画像ファイルは残します。
 
 `ENABLE_ARCHIVE_OLD_RECORDS=true` の場合はレコードアーカイブが最優先されます。`ENABLE_ARCHIVE_OLD_IMAGES=true` の場合は画像退避が次に優先され、`ENABLE_DELETE_OLD_IMAGES` は実行されません。
 
 ## GitHub Actions
 
-[`.github/workflows/compress-images.yml`](.github/workflows/compress-images.yml) で、毎日 JST 6:00 に実行されます。
+[`.github/workflows/compress-images.yml`](.github/workflows/compress-images.yml) で、毎時0分（UTC基準）に実行されます。差分実行と組み合わせることで、レコードの新規作成・更新（写真の追加や差し替えを含む）にバッチ処理が追いつくようにしています。Kintone の API 呼び出し上限や GitHub Actions の実行時間消費が気になる場合は、cron 式（`0 * * * *`）を 2〜3 時間おきなどに調整してください。
 
 必要な GitHub Secrets:
 
@@ -174,8 +183,8 @@ S3 のオブジェクトキーは、以下の形式で作成されます。
 | `KINTONE_BASE_URL` | Kintone のベース URL |
 | `KINTONE_API_TOKEN` | Kintone API トークン |
 | `KINTONE_APP_ID` | 対象アプリ ID |
-| `KINTONE_ATTACHMENT_FIELD` | 添付ファイルフィールドコード |
-| `PAT_TOKEN` | `LAST_PROCESSED_ID` の repository variable 更新に使う GitHub token |
+| `KINTONE_ATTACHMENT_FIELD` | 添付ファイルフィールドコード。対象アプリに複数の写真・添付フィールドがある場合は、圧縮対象にしたい全フィールドのコードをカンマ区切りで指定する（一部の写真だけ圧縮されない場合は、まずここに漏れがないか確認する） |
+| `PAT_TOKEN` | `LAST_PROCESSED_UPDATED_AT` の repository variable 更新に使う GitHub token |
 | `S3_BUCKET` | S3 アーカイブ先バケット名 |
 | `AWS_ACCESS_KEY_ID` | S3 書き込み権限を持つ AWS アクセスキー |
 | `AWS_SECRET_ACCESS_KEY` | S3 書き込み権限を持つ AWS シークレットアクセスキー |
@@ -194,7 +203,7 @@ S3 のオブジェクトキーは、以下の形式で作成されます。
 | `AWS_REGION` | S3 バケットのリージョン |
 | `MAX_API_CALLS` | API 呼び出し上限 |
 | `BATCH_SIZE` | バッチサイズ |
-| `LAST_PROCESSED_ID` | 差分実行の開始位置 |
+| `LAST_PROCESSED_UPDATED_AT` | 差分実行の開始位置（更新日時） |
 
 手動実行時は、以下を指定できます。
 

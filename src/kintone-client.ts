@@ -88,6 +88,44 @@ export class KintoneClient {
     return all;
   }
 
+  // 更新日時 昇順 + $id 昇順の複合カーソルでページング取得する。
+  // レコードの作成/更新（＝添付ファイルの追加・差し替え）を漏れなく検出するために使う。
+  async getAllRecordsByUpdatedTime(
+    query: string,
+    fields: string[]
+  ): Promise<KintoneRecord[]> {
+    const updatedField = "更新日時";
+    const all: KintoneRecord[] = [];
+    let cursor: { updatedAt: string; id: string } | null = null;
+    const limit = 500;
+
+    const fieldsWithExtras = Array.from(
+      new Set(["$id", updatedField, ...fields])
+    );
+
+    while (true) {
+      const cursorCondition = cursor
+        ? `(${updatedField} > "${cursor.updatedAt}") or (${updatedField} = "${cursor.updatedAt}" and $id > "${cursor.id}")`
+        : "";
+      const conditions = [cursorCondition, query]
+        .filter((c) => c !== "")
+        .map((c) => `(${c})`);
+      const fullQuery = `${conditions.join(" and ")}${conditions.length > 0 ? " " : ""}order by ${updatedField} asc, $id asc limit ${limit}`;
+
+      const res = await this.fetchRecords(fullQuery, fieldsWithExtras);
+      all.push(...res.records);
+      if (res.records.length < limit) break;
+
+      const last = res.records[res.records.length - 1];
+      cursor = {
+        updatedAt: last[updatedField].value as string,
+        id: last.$id.value,
+      };
+    }
+
+    return all;
+  }
+
   async getAllRecordsWithAllFields(query: string): Promise<KintoneRecord[]> {
     const all: KintoneRecord[] = [];
     let lastId = "0";

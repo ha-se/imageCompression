@@ -3,13 +3,14 @@ import { isImageFile } from "./compressor.js";
 import { KintoneClient } from "./kintone-client.js";
 import type { Config, DeleteResult } from "./types.js";
 
+// 実行月の retentionMonths ヶ月前の「月初日」を基準にする。
+// 例: 8月実行・retentionMonths=3 なら 5/1 が基準となり、5・6・7月分は丸ごと残る。
 function getCutoffDate(retentionMonths: number): string {
   const now = new Date();
-  now.setMonth(now.getMonth() - retentionMonths);
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  const cutoff = new Date(now.getFullYear(), now.getMonth() - retentionMonths, 1);
+  const yyyy = cutoff.getFullYear();
+  const mm = String(cutoff.getMonth() + 1).padStart(2, "0");
+  return `${yyyy}-${mm}-01`;
 }
 
 async function sleep(ms: number): Promise<void> {
