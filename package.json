@@ -6,6 +6,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "search-archive": "tsx src/search-archive.ts",
+    "list-fields": "tsx src/list-fields.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
