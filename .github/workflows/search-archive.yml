@@ -10,7 +10,7 @@ on:
       property_field:
         description: '検索対象フィールドコード'
         required: false
-        default: '物件名'
+        default: '物件名kv'
       from:
         description: '作成日時の開始日 (YYYY-MM-DD、指定日を含む)'
         required: false
