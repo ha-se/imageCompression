@@ -39,7 +39,7 @@ function loadConfig(): Config {
       process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "ap-northeast-1",
     maxApiCalls: Number(process.env.MAX_API_CALLS ?? "9000"),
     batchSize: Number(process.env.BATCH_SIZE ?? "100"),
-    lastProcessedId: process.env.LAST_PROCESSED_ID ?? "",
+    lastProcessedUpdatedAt: process.env.LAST_PROCESSED_UPDATED_AT ?? "",
     archiveQuery: process.env.ARCHIVE_QUERY ?? "",
   };
 }
@@ -52,6 +52,21 @@ function formatSize(bytes: number): string {
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 次回実行時の差分カーソルに使う安全マージン（秒）。
+// 同一 更新日時 のレコードが境界で取りこぼされないよう、少し過去まで戻して再スキャンする。
+// 圧縮済みファイルは閾値以下になるため再スキャンされても即スキップされ、コストは小さい。
+const UPDATED_AT_OVERLAP_SECONDS = 10;
+
+function toKintoneDateTime(date: Date): string {
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function withOverlapMargin(isoString: string): string {
+  const d = new Date(isoString);
+  d.setSeconds(d.getSeconds() - UPDATED_AT_OVERLAP_SECONDS);
+  return toKintoneDateTime(d);
 }
 
 async function runCompression(
@@ -68,21 +83,26 @@ async function runCompression(
     console.log(`バッチサイズ: ${config.batchSize}件`);
   }
 
-  // 差分取得: LAST_PROCESSED_ID が設定されている場合、それより大きいIDのレコードのみ取得
-  const isIncrementalMode = config.lastProcessedId !== "";
+  // 差分取得: LAST_PROCESSED_UPDATED_AT が設定されている場合、それ以降に作成・更新
+  // （＝添付ファイルの追加・差し替えを含む）されたレコードのみ取得する。
+  // $id ベースのカーソルと異なり、既にスキャン済みのレコードに後から写真が
+  // 追加・差し替えされた場合も取りこぼさない。
+  const isIncrementalMode = config.lastProcessedUpdatedAt !== "";
   if (isIncrementalMode) {
-    console.log(`差分モード: $id > ${config.lastProcessedId} のレコードのみ取得`);
+    console.log(
+      `差分モード: 更新日時 > ${config.lastProcessedUpdatedAt} のレコードのみ取得`
+    );
   } else {
     console.log("フルスキャンモード: 全レコードを取得");
   }
   console.log();
 
-  // 全フィールドをまとめて1回で取得
+  // 全フィールドをまとめて1回で取得（更新日時の古い順）
   const query = isIncrementalMode
-    ? `$id > "${config.lastProcessedId}"`
+    ? `更新日時 > "${config.lastProcessedUpdatedAt}"`
     : "";
   const fields = ["$id", ...fieldCodes];
-  const records = await client.getAllRecords(query, fields);
+  const records = await client.getAllRecordsByUpdatedTime(query, fields);
   console.log(`取得レコード数: ${records.length}`);
 
   const results: ProcessResult[] = [];
@@ -90,7 +110,7 @@ async function runCompression(
   let totalSaved = 0;
   let processedCount = 0;
   let stoppedByApiLimit = false;
-  let lastCheckedId = "";
+  let lastScannedUpdatedAt = "";
 
   for (const record of records) {
     const recordId = record.$id.value;
@@ -110,8 +130,9 @@ async function runCompression(
       break;
     }
 
-    // 走査済みIDを更新（圧縮不要でもカウント）
-    lastCheckedId = recordId;
+    // 走査済み更新日時を更新（圧縮不要でもカウント）。
+    // レコードは更新日時の昇順で取得しているため、単調に前進する。
+    lastScannedUpdatedAt = record["更新日時"].value as string;
     processedCount++;
 
     // 全フィールドの添付ファイルを確認
@@ -229,9 +250,12 @@ async function runCompression(
     console.log("※ API上限により中断 — 残りは次回実行時に処理されます");
   }
 
-  // 走査済み最大IDを出力（GitHub Actionsで変数更新に使用）
-  if (lastCheckedId) {
-    console.log(`LAST_PROCESSED_ID=${lastCheckedId}`);
+  // 走査済み最大更新日時を出力（GitHub Actionsで変数更新に使用）。
+  // 安全マージン分だけ過去に戻した値を次回カーソルにする。
+  if (lastScannedUpdatedAt) {
+    console.log(
+      `LAST_PROCESSED_UPDATED_AT=${withOverlapMargin(lastScannedUpdatedAt)}`
+    );
   }
 
   const errorCount = results.reduce((sum, r) => sum + r.errors.length, 0);
