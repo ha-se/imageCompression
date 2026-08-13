@@ -150,6 +150,28 @@ GitHub Actions ではこの値を読み取り、repository variable の `LAST_PR
 
 処理順序は、画像保存、画像の S3 URI を含むレコード JSON 保存、Kintone レコード削除です。途中で失敗した場合、Kintone レコードは削除しません。
 
+### アーカイブ済みデータの検索
+
+S3 のオブジェクトキーはレコードID単位のみで、日付や物件名などでは整理されていません。該当データを探すには `search-archive` スクリプトで全 `record.json` をスキャンして絞り込みます。
+
+```bash
+S3_BUCKET="smp-op-station-patrol-kintone-archive" \
+AWS_REGION="ap-northeast-1" \
+KINTONE_APP_ID="123" \
+npm run search-archive -- --property "ファミリーマート瀬谷相沢店" --from 2026-04-01 --to 2026-05-01
+```
+
+オプション:
+
+| オプション | 説明 |
+| --- | --- |
+| `--property` | 指定フィールド（デフォルト `物件名`）にこの文字列を含むレコードのみ表示 |
+| `--property-field` | 絞り込み対象のフィールドコード。デフォルト `物件名` |
+| `--from` / `--to` | `作成日時` の範囲（`--to` は含まない） |
+| `--created-field` | 日付絞り込みに使うフィールドコード。デフォルト `作成日時` |
+
+対象件数が多いと全件スキャンに数分〜数十分かかります（検索頻度が低い運用を想定した簡易実装です）。実行には、S3 バケットに対する `s3:ListBucket` と `s3:GetObject` の権限を持つ AWS 認証情報が必要です（アーカイブ書き込み用の IAM ユーザーには通常付与されていないため、別途追加してください）。
+
 ## 古い画像の S3 退避
 
 `ENABLE_ARCHIVE_OLD_IMAGES=true` の場合、圧縮処理の前に古いレコードの画像添付を S3 に退避し、退避に成功したあと Kintone の添付ファイルフィールドから削除します。
