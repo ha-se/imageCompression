@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
+    "search-archive": "tsx src/search-archive.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
