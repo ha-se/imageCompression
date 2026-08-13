@@ -130,9 +130,10 @@ export class S3ArchiveClient {
 }
 
 function sanitizePathSegment(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(/[^\w.\-=]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 180);
+  // \w はASCII英数字のみにマッチするため、日本語などの非ASCII文字は
+  // 元の実装だと全て "_" に潰れて空文字列になり得た
+  // （例: 「その他報告写真」→ 空 → S3キーに "//" が入る）。
+  // encodeURIComponent で安全なASCII文字列に変換してから使う。
+  const encoded = encodeURIComponent(value.normalize("NFKC")).slice(0, 180);
+  return encoded || "_";
 }
