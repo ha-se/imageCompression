@@ -39,8 +39,8 @@ export async function archiveOldRecords(
     console.log(`基準日: ${cutoffDate} より前のレコードが対象`);
   }
   console.log(`画像対象フィールド: ${fieldCodes.join(", ")}`);
-  if (config.batchSize > 0) {
-    console.log(`バッチサイズ: ${config.batchSize}件`);
+  if (config.archiveBatchSize > 0) {
+    console.log(`バッチサイズ: ${config.archiveBatchSize}件`);
   }
   console.log(`S3バケット: ${config.s3Bucket}`);
   if (config.s3Prefix) {
@@ -61,8 +61,8 @@ export async function archiveOldRecords(
   for (const record of records) {
     const recordId = record.$id.value;
 
-    if (config.batchSize > 0 && processedCount >= config.batchSize) {
-      console.log(`バッチサイズ上限 (${config.batchSize}件) に達しました`);
+    if (config.archiveBatchSize > 0 && processedCount >= config.archiveBatchSize) {
+      console.log(`バッチサイズ上限 (${config.archiveBatchSize}件) に達しました`);
       break;
     }
 
