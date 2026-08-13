@@ -35,7 +35,7 @@ function parseArgs(): SearchOptions {
     property: get("--property"),
     from: get("--from"),
     to: get("--to"),
-    propertyField: get("--property-field") ?? "物件名",
+    propertyField: get("--property-field") ?? "物件名kv",
     createdField: get("--created-field") ?? "作成日時",
   };
 }
