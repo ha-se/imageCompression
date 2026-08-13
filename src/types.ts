@@ -73,6 +73,7 @@ export interface Config {
   awsRegion: string;
   maxApiCalls: number;
   batchSize: number;
+  archiveBatchSize: number;
   lastProcessedUpdatedAt: string;
   archiveQuery: string;
 }

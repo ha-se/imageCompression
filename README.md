@@ -69,7 +69,8 @@ npm start
 | `S3_PREFIX` | 空 | S3 オブジェクトキーの先頭に付けるプレフィックス |
 | `AWS_REGION` | `ap-northeast-1` | S3 バケットのリージョン |
 | `MAX_API_CALLS` | `9000` | 1 回の実行で許可する API 呼び出し数 |
-| `BATCH_SIZE` | `100` | 1 回の実行で走査するレコード数。`0` で無制限 |
+| `BATCH_SIZE` | `100` | 1 回の実行で走査するレコード数（画像圧縮）。`0` で無制限 |
+| `ARCHIVE_BATCH_SIZE` | `BATCH_SIZE` と同じ | 1 回の実行でアーカイブするレコード数（`ENABLE_ARCHIVE_OLD_RECORDS=true` 時）。`0` で無制限。圧縮とは独立して調整できる |
 | `LAST_PROCESSED_UPDATED_AT` | 空 | 指定時は `更新日時` がこの値より後のレコードのみ処理する |
 | `ARCHIVE_QUERY` | 空 | アーカイブ/削除対象を上書きする Kintone クエリ。空の場合は `RETENTION_MONTHS` で判定 |
 
@@ -226,12 +227,14 @@ S3 のオブジェクトキーは、以下の形式で作成されます。
 | `S3_PREFIX` | S3 オブジェクトキーのプレフィックス |
 | `AWS_REGION` | S3 バケットのリージョン |
 | `MAX_API_CALLS` | API 呼び出し上限 |
-| `BATCH_SIZE` | バッチサイズ |
+| `BATCH_SIZE` | バッチサイズ（画像圧縮） |
+| `ARCHIVE_BATCH_SIZE` | バッチサイズ（レコードアーカイブ）。未設定なら `BATCH_SIZE` と同じ |
 | `LAST_PROCESSED_UPDATED_AT` | 差分実行の開始位置（更新日時） |
 
 手動実行時は、以下を指定できます。
 
-- `batch_size`: 処理レコード上限
+- `batch_size`: 圧縮処理レコード上限
+- `archive_batch_size`: アーカイブ処理レコード上限（空なら `batch_size` と同じ）
 - `enable_record_archive`: 古いレコード全体を S3 へアーカイブして Kintone から削除
 - `enable_archive`: 古い画像を S3 へ退避して Kintone から削除
 - `enable_delete`: 古い画像削除の有効化
