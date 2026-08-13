@@ -126,7 +126,7 @@ GitHub Actions ではこの値を読み取り、repository variable の `LAST_PR
 
 `ENABLE_ARCHIVE_OLD_RECORDS=true` の場合、圧縮処理の前に古い Kintone レコードを S3 にアーカイブし、アーカイブに成功したあと Kintone からレコード自体を削除します。
 
-削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。S3 には、レコード JSON 全体と、対象添付フィールド内の画像ファイルを別々に保存します。
+削除対象は、`作成日時` が基準日（実行月から `RETENTION_MONTHS` ヶ月前の月の1日）より前のレコードです。例えば 8 月に `RETENTION_MONTHS=3` で実行すると、基準日は 5/1 になり、5・6・7 月分は丸ごと Kintone に残ります。S3 には、レコード JSON 全体と、対象添付フィールド内の画像ファイルを別々に保存します。
 
 テストなどで対象期間を明示したい場合は、`ARCHIVE_QUERY` で Kintone クエリを指定できます。たとえば 2025年分だけを対象にする場合は、以下を指定します。
 
@@ -154,7 +154,7 @@ GitHub Actions ではこの値を読み取り、repository variable の `LAST_PR
 
 `ENABLE_ARCHIVE_OLD_IMAGES=true` の場合、圧縮処理の前に古いレコードの画像添付を S3 に退避し、退避に成功したあと Kintone の添付ファイルフィールドから削除します。
 
-削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。対象フィールド内の画像ファイルだけを S3 に保存して Kintone から削除し、非画像ファイルは Kintone に残します。
+削除対象は、`作成日時` が基準日（実行月から `RETENTION_MONTHS` ヶ月前の月の1日）より前のレコードです。対象フィールド内の画像ファイルだけを S3 に保存して Kintone から削除し、非画像ファイルは Kintone に残します。
 
 S3 のオブジェクトキーは、以下の形式で作成されます。
 
@@ -168,7 +168,7 @@ S3 のオブジェクトキーは、以下の形式で作成されます。
 
 `ENABLE_DELETE_OLD_IMAGES=true` の場合、圧縮処理の前に古いレコードの画像添付を削除します。
 
-削除対象は、`作成日時` が `RETENTION_MONTHS` ヶ月より前のレコードです。対象フィールド内の画像ファイルだけを削除し、非画像ファイルは残します。
+削除対象は、`作成日時` が基準日（実行月から `RETENTION_MONTHS` ヶ月前の月の1日）より前のレコードです。対象フィールド内の画像ファイルだけを削除し、非画像ファイルは残します。
 
 `ENABLE_ARCHIVE_OLD_RECORDS=true` の場合はレコードアーカイブが最優先されます。`ENABLE_ARCHIVE_OLD_IMAGES=true` の場合は画像退避が次に優先され、`ENABLE_DELETE_OLD_IMAGES` は実行されません。
 
