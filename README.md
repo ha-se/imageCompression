@@ -172,6 +172,8 @@ npm run search-archive -- --property "ファミリーマート瀬谷相沢店" -
 
 対象件数が多いと全件スキャンに数分〜数十分かかります（検索頻度が低い運用を想定した簡易実装です）。実行には、S3 バケットに対する `s3:ListBucket` と `s3:GetObject` の権限を持つ AWS 認証情報が必要です（アーカイブ書き込み用の IAM ユーザーには通常付与されていないため、別途追加してください）。
 
+ローカルに Node.js 環境がない場合は、[`.github/workflows/search-archive.yml`](.github/workflows/search-archive.yml) を `workflow_dispatch` で手動実行することでも同じ検索ができます（`property` / `property_field` / `from` / `to` / `created_field` を入力欄に指定）。既存の GitHub Secrets・Variables をそのまま使います。
+
 ## 古い画像の S3 退避
 
 `ENABLE_ARCHIVE_OLD_IMAGES=true` の場合、圧縮処理の前に古いレコードの画像添付を S3 に退避し、退避に成功したあと Kintone の添付ファイルフィールドから削除します。

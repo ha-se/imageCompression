@@ -1,0 +1,67 @@
+name: S3アーカイブ検索
+
+on:
+  workflow_dispatch:
+    inputs:
+      property:
+        description: '検索文字列（property-field に部分一致するもの）'
+        required: false
+        default: ''
+      property_field:
+        description: '検索対象フィールドコード'
+        required: false
+        default: '物件名'
+      from:
+        description: '作成日時の開始日 (YYYY-MM-DD、指定日を含む)'
+        required: false
+        default: ''
+      to:
+        description: '作成日時の終了日 (YYYY-MM-DD、指定日は含まない)'
+        required: false
+        default: ''
+      created_field:
+        description: '日付絞り込みに使うフィールドコード'
+        required: false
+        default: '作成日時'
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: 検索実行
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.property }}" ]; then
+            ARGS="$ARGS --property \"${{ github.event.inputs.property }}\""
+          fi
+          if [ -n "${{ github.event.inputs.property_field }}" ]; then
+            ARGS="$ARGS --property-field \"${{ github.event.inputs.property_field }}\""
+          fi
+          if [ -n "${{ github.event.inputs.from }}" ]; then
+            ARGS="$ARGS --from \"${{ github.event.inputs.from }}\""
+          fi
+          if [ -n "${{ github.event.inputs.to }}" ]; then
+            ARGS="$ARGS --to \"${{ github.event.inputs.to }}\""
+          fi
+          if [ -n "${{ github.event.inputs.created_field }}" ]; then
+            ARGS="$ARGS --created-field \"${{ github.event.inputs.created_field }}\""
+          fi
+          eval "npx tsx src/search-archive.ts $ARGS"
+        env:
+          KINTONE_APP_ID: ${{ secrets.KINTONE_APP_ID }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_PREFIX: ${{ vars.S3_PREFIX || '' }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-1' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
